@@ -11,9 +11,8 @@ from streamlit.logger import get_logger
 from rstracer import Rstracer
 
 LOGGER = get_logger(__name__)
-
-RSTRACER_PATH = "rstracer"
-RSTRACER_INIT_DURATION = 20
+LOG_PATH = ".output/log"
+RSTRACER_INIT_DURATION = 15
 
 
 def get_descendants(pid):
@@ -23,29 +22,39 @@ def get_descendants(pid):
     return children
 
 
-def behavior(command, user, lifetime, st):
+def launch_behavior_analysis(command, user, lifetime, progress_bar):
+    st.sidebar.warning(
+        "Warning: This program requires sudo permissions. Please check your console to enter your password."
+    )
+    if not os.path.exists(".output/log/"):
+        os.makedirs(".output/log/")
+    log_file = open(".output/log/command.log", "w")
+    os.environ["RSBV_START"] = datetime.now(timezone.utc).strftime("%Y/%m/%d %H:%M:%S")
 
-    log_file = open("command.log", "w")
-    start = datetime.now(timezone.utc)
-    rstracer = Rstracer(RSTRACER_PATH)
-    progress_bar = st.progress(0, text="Analysing the environment...")
-    rstracer.launch()
+    Rstracer().stop()
+    os.environ["RSBV_RSTRACER_PID"] = str(Rstracer().launch())
     for percent_complete in range(RSTRACER_INIT_DURATION):
         sleep(1)
         progress_bar.progress(int(percent_complete / RSTRACER_INIT_DURATION * 100), text="Analysing the environment...")
 
-    process = subprocess.Popen(["sudo", "-u", user, command], stdout=log_file, stderr=log_file)
+    process = subprocess.Popen(f"sudo -u {user} {command}", stdout=log_file, stderr=log_file, shell=True)
+    os.environ["RSBV_PID"] = str(process.pid)
     for percent_complete in range(lifetime):
         sleep(1)
         progress_bar.progress(int(percent_complete / lifetime * 100), text="Analysing your command...")
 
-    progress_bar.progress(90, text="Kill all processes")
-    for pid in [process.pid] + get_descendants(process.pid):
-        os.kill(pid, signal.SIGTERM)
+    stop_behavior_analysis(progress_bar)
 
-    rstracer.stop()
-    os.environ["RSBV_PID"] = str(process.pid)
-    os.environ["RSBV_START"] = start.strftime("%Y/%m/%d %H:%M:%S")
+
+def stop_behavior_analysis(progress_bar):
+    progress_bar.progress(90, text="Stop rstracer...")
+    pid = int(os.environ["RSBV_PID"])
+    Rstracer().stop()
+    for pid in [pid] + get_descendants(pid):
+        try:
+            os.kill(pid, signal.SIGTERM)
+        except ProcessLookupError:
+            pass
     progress_bar.progress(100, text="Ready !")
 
 
@@ -61,8 +70,16 @@ def run():
     user = st.text_input("With user")
     lifetime = st.number_input("During", step=1)
 
-    if st.button("Launch 🚀"):
-        behavior(command, user, lifetime, st)
+    button_column = st.columns(2)
+    progress_bar = st.progress(0, text="")
+
+    with button_column[0]:
+        if st.button("Launch 🚀"):
+            launch_behavior_analysis(command, user, lifetime, progress_bar)
+
+    with button_column[1]:
+        if st.button("Stop"):
+            stop_behavior_analysis(progress_bar)
 
 
 if __name__ == "__main__":
