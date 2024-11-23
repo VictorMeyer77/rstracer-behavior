@@ -46,6 +46,7 @@ clean:            ## Clean unused files.
 	@rm -rf *.log
 	@rm -rf *.db
 	@rm -rf *.wal
+	@rm -rf .output/
 
 .PHONY: virtualenv
 virtualenv:       ## Create a virtual environment.
