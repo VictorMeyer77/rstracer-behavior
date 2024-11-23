@@ -1,8 +1,32 @@
 import duckdb
 
+OUTPUT_PATH = ".output/rstracer"
 
-def connection(db_path="rstracer.db"):
-    con = duckdb.connect(database=db_path, read_only=True)
+TABLES = [
+    "gold_dim_file_reg",
+    "gold_dim_network_foreign_ip",
+    "gold_dim_network_local_ip",
+    "gold_dim_network_open_port",
+    "gold_dim_network_socket",
+    "gold_dim_network_host",
+    "gold_dim_process",
+    "gold_fact_file_reg",
+    "gold_fact_network_ip",
+    "gold_fact_network_packet",
+    "gold_fact_process",
+    "gold_fact_process_network",
+    "gold_file_host",
+    "gold_file_service",
+    "gold_file_user",
+    "gold_tech_chrono",
+    "gold_tech_table_count",
+]
+
+
+def connection():
+    con = duckdb.connect(database=":memory:")
+    for table in TABLES:
+        con.execute(f"CREATE TABLE {table} AS SELECT * FROM '{OUTPUT_PATH}/{table}.parquet';")
     return con
 
 

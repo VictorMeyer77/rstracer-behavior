@@ -30,13 +30,13 @@ show = st.sidebar.selectbox("Show only", ["all packet", "from launched processes
 # Base filter arguments
 
 filter_args = [
-        [process.pid for process in descendants],
-        show,
-        analyse_start,
-        show,
-        show,
-        [process.pid for process in rstracer_processes],
-    ]
+    [process.pid for process in descendants],
+    show,
+    analyse_start,
+    show,
+    show,
+    [process.pid for process in rstracer_processes],
+]
 
 # Process by network
 
@@ -45,8 +45,8 @@ st.subheader("Packet size by command", divider=True)
 packet_process = con.execute(
     """
 SELECT
-    TO_TIMESTAMP(FLOOR(EXTRACT('epoch' FROM packet.created_at) / 10) * 10) AT TIME ZONE 'UTC' AS time,
-    COALESCE(pro.command, 'Unknown') AS command,
+    TO_TIMESTAMP(FLOOR(EXTRACT('epoch' FROM packet.created_at))) AT TIME ZONE 'UTC' AS time,
+    COALESCE(pro.command, pro.full_command, 'Unknown') AS command,
     ROUND(SUM(length) / (1024 * 1024), 3) AS size
 FROM gold_fact_network_packet packet
 LEFT JOIN gold_fact_process_network net_pro ON net_pro.packet_id = packet._id
@@ -55,9 +55,10 @@ WHERE  ((net_pro.pid IN ? AND ? = 'from launched processes')
         OR (packet.created_at >= ? AND ? = 'new packet')
         OR (? = 'all packet'))
     AND COALESCE(net_pro.pid, -1) NOT IN ?
-GROUP BY time, command
+GROUP BY time, COALESCE(pro.command, pro.full_command, 'Unknown')
 ORDER BY time
-""", filter_args
+""",
+    filter_args,
 ).df()
 
 st.area_chart(
@@ -78,10 +79,10 @@ packets = con.execute(
     """
 SELECT DISTINCT
     packet.created_at AS 'created',
-    COALESCE(pro.command, 'Unknown') AS command,
-    HOST(ip.source_address) AS 'sender address',
+    COALESCE(pro.command, pro.full_command, 'Unknown') AS command,
+    HOST(ip.source_address::INET) AS 'sender address',
     ip.source_port AS 'sender port',
-    HOST(ip.destination_address) AS 'receiver address',
+    HOST(ip.destination_address::INET) AS 'receiver address',
     ip.destination_port AS 'receiver port',
     length AS 'size (bytes)',
     send AS 'local source'
@@ -94,7 +95,8 @@ WHERE  ((net_pro.pid IN ? AND ? = 'from launched processes')
         OR (? = 'all packet'))
     AND COALESCE(net_pro.pid, -1) NOT IN ?
 ORDER BY packet.created_at
-""", filter_args
+""",
+    filter_args,
 ).df()
 
 st.dataframe(packets, use_container_width=True, hide_index=True)

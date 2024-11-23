@@ -51,7 +51,6 @@ SELECT
 FROM
   gold_fact_file_reg fact
   LEFT JOIN gold_dim_process pro ON fact.pid = pro.pid
-  LEFT JOIN gold_file_user usr ON pro.uid = usr.uid
   LEFT JOIN gold_dim_file_reg dim ON fact.pid = dim.pid AND fact.fd = dim.fd AND fact.node = dim.node
 WHERE ((fact.pid IN ? AND ? = 'launched processes')
     OR (pro.started_at >= ? AND ? = 'new processes')
@@ -61,7 +60,8 @@ GROUP BY
   time
 ORDER BY
   time
-""", filter_args
+""",
+    filter_args,
 ).df()
 
 st.text("Open files total")
@@ -102,7 +102,6 @@ FROM
    FROM
       gold_fact_file_reg fact
       LEFT JOIN gold_dim_process pro ON fact.pid = pro.pid
-      LEFT JOIN gold_file_user usr ON pro.uid = usr.uid
    WHERE
      ((fact.pid IN ? AND ? = 'launched processes')
         OR (pro.started_at >= ? AND ? = 'new processes')
@@ -117,7 +116,8 @@ GROUP BY
  command
 ORDER BY
  time
-  """, filter_args
+  """,
+    filter_args,
 ).df()
 
 
@@ -171,7 +171,8 @@ FROM
 )
 WHERE (modification_size > 0 OR NOT ?)
 ORDER BY modification_size DESC
-""", filter_args + [show_only_modified_files]
+""",
+    filter_args + [show_only_modified_files],
 ).df()
 
 st.dataframe(files_list, use_container_width=True, hide_index=True)
@@ -219,7 +220,8 @@ GROUP BY
  command
 ORDER BY
  count DESC
-""", filter_args
+""",
+    filter_args,
 ).df()
 
 st.bar_chart(
@@ -248,7 +250,8 @@ FROM
         OR (pro.started_at >= ? AND ? = 'new processes')
         OR (? = 'all processes'))
     AND file.pid NOT IN ?
-""", filter_args
+""",
+    filter_args,
 ).fetchone()[0]
 st.sidebar.write("Opened nodes: ", open_nodes)
 
@@ -260,12 +263,12 @@ SELECT
     COUNT(DISTINCT file.name) AS count
 FROM gold_dim_file_reg file
     LEFT JOIN gold_dim_process pro ON file.pid = pro.pid
-    LEFT JOIN gold_file_user usr ON pro.uid = usr.uid
     WHERE ((file.pid IN ? AND ? = 'launched processes')
         OR (pro.started_at >= ? AND ? = 'new processes')
         OR (? = 'all processes'))
     AND file.pid NOT IN ?
-""", filter_args,
+""",
+    filter_args,
 ).fetchone()[0]
 st.sidebar.write("Opened files: ", open_files)
 
@@ -283,7 +286,6 @@ FROM
    FROM
       gold_fact_file_reg fact
      LEFT JOIN gold_dim_process pro ON fact.pid = pro.pid
-     LEFT JOIN gold_file_user usr ON pro.uid = usr.uid
      LEFT JOIN gold_dim_file_reg file ON fact.pid = file.pid
      AND fact.fd = file.fd
      AND fact.node = file.node
@@ -296,7 +298,8 @@ FROM
      )
 WHERE
   max_size <> min_size
-""", filter_args
+""",
+    filter_args,
 ).fetchone()[0]
 st.sidebar.write("Modified files: ", modified_files)
 
@@ -314,7 +317,6 @@ FROM
    FROM
       gold_fact_file_reg fact
      LEFT JOIN gold_dim_process pro ON fact.pid = pro.pid
-     LEFT JOIN gold_file_user usr ON pro.uid = usr.uid
      LEFT JOIN gold_dim_file_reg file ON fact.pid = file.pid
      AND fact.fd = file.fd
      AND fact.node = file.node
@@ -330,7 +332,8 @@ FROM
      )
 WHERE
   max_size <> min_size
-""", filter_args
+""",
+    filter_args,
 ).fetchone()[0]
 st.sidebar.write("Modification size: ", modification_size, " Mo")
 

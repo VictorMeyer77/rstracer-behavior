@@ -30,21 +30,21 @@ show = st.sidebar.selectbox("Show only", ["launched processes", "new processes",
 # Base filter arguments
 
 filter_args = [
-        [process.pid for process in descendants],
-        show,
-        analyse_start,
-        show,
-        show,
-        [process.pid for process in rstracer_processes],
-    ]
+    [process.pid for process in descendants],
+    show,
+    analyse_start,
+    show,
+    show,
+    [process.pid for process in rstracer_processes],
+]
 
 # Mem & Cpu Analysis
 
 resource_per_command = con.execute(
     """
 SELECT
-    SUM(fact.pcpu) AS pcpu,
-    SUM(fact.pmem) AS pmem,
+    MAX(fact.pcpu) AS pcpu,
+    MAX(fact.pmem) AS pmem,
     COALESCE(dim.command, dim.full_command) AS command,
     TO_TIMESTAMP(FLOOR(EXTRACT('epoch' FROM fact.created_at))) AT TIME ZONE 'UTC' AS time,
 FROM
@@ -57,7 +57,8 @@ OR (? = 'all processes'))
 AND fact.pid NOT IN ?
 GROUP BY time, COALESCE(dim.command, dim.full_command)
 ORDER BY time
-""", filter_args
+""",
+    filter_args,
 ).df()
 
 
@@ -105,7 +106,8 @@ SELECT
 FROM process
 GROUP BY command
 ORDER BY count DESC
-""", filter_args
+""",
+    filter_args,
 ).df()
 
 st.text("Process total launched by command")
@@ -136,7 +138,8 @@ OR (? = 'all processes'))
 AND pid NOT IN ?
 ORDER BY started_at ASC
 LIMIT 300
-""", filter_args
+""",
+    filter_args,
 ).df()
 
 st.subheader("Process History", divider=True)
@@ -162,14 +165,13 @@ FROM
     gold_fact_process fact
 LEFT JOIN
     gold_dim_process pro ON fact.pid = pro.pid
-LEFT JOIN
-    gold_file_user usr ON pro.uid = usr.uid
 LEFT JOIN gold_dim_process dim ON fact.pid = dim.pid
 WHERE ((fact.pid IN ? AND ? = 'launched processes')
 OR (dim.started_at >= ? AND ? = 'new processes')
 OR (? = 'all processes'))
 AND fact.pid NOT IN ?
-""", filter_args
+""",
+    filter_args,
 ).fetchone()[0]
 
 st.sidebar.write("Process total: ", process_total)

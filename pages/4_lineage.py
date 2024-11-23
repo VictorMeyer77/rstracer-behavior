@@ -15,6 +15,8 @@ SOCKET_COLOR = "#FF6E6E"
 EDGE_COLOR = "#82EFFF"
 FOREIGN_HOST_COLOR = "#FFFF85"
 
+MAX_DISTINCT_COMMAND_BY_CHILD = 5
+
 start_timer = timer()
 con = connection()
 
@@ -136,7 +138,7 @@ def get_process_by_pid(pid):
     return Process(process) if process is not None else None
 
 
-def get_processes_by_ppid(ppid):  # todo
+def get_processes_by_ppid(ppid):
     process_buffer = []
     processes = con.execute(
         """
@@ -150,7 +152,8 @@ def get_processes_by_ppid(ppid):  # todo
         pro.inserted_at,
     FROM gold_dim_process pro
     LEFT JOIN gold_file_user usr ON usr.uid = pro.uid
-    WHERE pro.ppid = ?""",
+    WHERE pro.ppid = ?
+    ORDER BY pro.started_at ASC""",
         [str(ppid)],
     ).df()
     for row in processes.itertuples(index=False, name=None):
@@ -269,18 +272,31 @@ def add_ancestor(process, graph):
         add_ancestor(parent, graph)
 
 
-def add_descendant(node_id, pid, graph):
+def add_descendant(node_id, pid, graph, process_node_buffer):
     last_process_id = ""
     children = get_processes_by_ppid(pid)
+    cut_commands = []
     for child in children:
-        child.add_node(graph)
-        graph.edge(node_id, child.id, color=EDGE_COLOR)
-        if last_process_id != "":
-            graph.edge(last_process_id, child.id, color=BACKGROUND_COLOR)
-        last_process_id = child.id
-        add_open_file(child.id, child.pid, graph)
-        add_open_socket(child.id, child.pid, graph)
-        add_descendant(child.id, child.pid, graph)
+        if (
+            len([p for p in process_node_buffer if p.full_command == child.full_command and p.ppid == child.ppid])
+            > MAX_DISTINCT_COMMAND_BY_CHILD
+        ):
+            cut_commands.append(child.full_command)
+        else:
+            child.add_node(graph)
+            graph.edge(node_id, child.id, color=EDGE_COLOR)
+            if last_process_id != "":
+                graph.edge(last_process_id, child.id, color=BACKGROUND_COLOR)
+            last_process_id = child.id
+            add_open_file(child.id, child.pid, graph)
+            add_open_socket(child.id, child.pid, graph)
+            add_descendant(child.id, child.pid, graph, process_node_buffer)
+        process_node_buffer.append(child)
+    for command in set(cut_commands):
+        occurence = len([c for c in cut_commands if c == command]) + MAX_DISTINCT_COMMAND_BY_CHILD
+        st.sidebar.warning(
+            f"Command '{command}' with PPID {pid} was launched {occurence} times. Showing only the first 5."
+        )
 
 
 def add_open_file(node_id, pid, graph):
@@ -314,12 +330,13 @@ pid = int(os.environ["RSBV_PID"])
 graph = graphviz.Digraph(format="png")
 graph.attr(bgcolor=BACKGROUND_COLOR)
 
+process_node_buffer: list[Process] = []
 process = get_process_by_pid(pid)
 process.add_node(graph)
 add_open_file(process.id, process.pid, graph)
 add_open_socket(process.id, pid, graph)
 add_ancestor(process, graph)
-add_descendant(process.id, process.pid, graph)
+add_descendant(process.id, process.pid, graph, process_node_buffer)
 
 st.graphviz_chart(graph)
 save_and_open = st.button("Open in explorer 🔎")
