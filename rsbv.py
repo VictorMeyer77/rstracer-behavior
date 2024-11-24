@@ -12,7 +12,7 @@ from rstracer import Rstracer
 
 LOGGER = get_logger(__name__)
 LOG_PATH = ".output/log"
-RSTRACER_INIT_DURATION = 15
+RSTRACER_INIT_DURATION = 20
 
 
 def get_descendants(pid):
