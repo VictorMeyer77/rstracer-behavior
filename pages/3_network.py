@@ -77,19 +77,29 @@ st.subheader("Packet I/0 history", divider=True)
 
 packets = con.execute(
     """
+WITH fact_ip_host AS
+(
+    SELECT
+     fact.*,
+     host1.host AS source_host,
+     host2.host AS destination_host
+    FROM gold_fact_network_ip fact
+    LEFT JOIN gold_dim_network_host host1 ON fact.source_address = host1.address
+    LEFT JOIN gold_dim_network_host host2 ON fact.destination_address = host2.address
+)
 SELECT DISTINCT
     packet.created_at AS 'created',
     COALESCE(pro.command, pro.full_command, 'Unknown') AS command,
-    HOST(ip.source_address::INET) AS 'sender address',
+    ip.source_host AS 'sender address',
     ip.source_port AS 'sender port',
-    HOST(ip.destination_address::INET) AS 'receiver address',
+    ip.destination_host AS 'receiver address',
     ip.destination_port AS 'receiver port',
     length AS 'size (bytes)',
     send AS 'local source'
 FROM gold_fact_network_packet packet
 INNER JOIN gold_fact_process_network net_pro ON net_pro.packet_id = packet._id
 LEFT JOIN gold_dim_process pro ON net_pro.pid = pro.pid
-LEFT JOIN gold_fact_network_ip ip ON packet._id = ip._id
+LEFT JOIN fact_ip_host ip ON packet._id = ip._id
 WHERE  ((net_pro.pid IN ? AND ? = 'from launched processes')
         OR (packet.created_at >= ? AND ? = 'new packet')
         OR (? = 'all packet'))
@@ -190,34 +200,47 @@ foreign_ip_column = st.columns(2, gap="large")
 
 foreign_ip_traffic = con.execute(
     """
-WITH ip AS
+WITH fact_ip_host AS
+(
+    SELECT
+     fact.*,
+     host1.host AS source_host,
+     host2.host AS destination_host
+    FROM gold_fact_network_ip fact
+    LEFT JOIN gold_dim_network_host host1 ON fact.source_address = host1.address
+    LEFT JOIN gold_dim_network_host host2 ON fact.destination_address = host2.address
+),
+ip AS
 (
     SELECT
         fact.created_at,
-        COALESCE(fip1.address, fip2.address)::INET AS address,
         CASE
-            WHEN fip1.address IS NOT NULL THEN 0
-            WHEN fip2.address IS NOT NULL THEN 1
+            WHEN source_host.address IS NOT NULL THEN fact.source_host
+            WHEN destination_host.address IS NOT NULL THEN fact.destination_host
+        END AS address,
+        CASE
+            WHEN source_host.address IS NOT NULL THEN 0
+            WHEN destination_host.address IS NOT NULL THEN 1
         END AS send,
         pack.length,
-    FROM gold_fact_network_ip fact
-    LEFT JOIN (SELECT  address FROM  gold_dim_network_foreign_ip) fip1
-    ON fact.source_address = fip1.address
-    LEFT JOIN (SELECT  address FROM  gold_dim_network_foreign_ip) fip2
-    ON fact.destination_address = fip2.address
+    FROM fact_ip_host fact
+    LEFT JOIN (SELECT address FROM gold_dim_network_foreign_ip) source_host
+    ON fact.source_address = source_host.address
+    LEFT JOIN (SELECT address FROM gold_dim_network_foreign_ip) destination_host
+    ON fact.destination_address = destination_host.address
     LEFT JOIN gold_fact_network_packet pack ON fact._id = pack._id
-    WHERE NOT (fip1.address IS NULL AND fip2.address IS NULL)
-    AND NOT (fip1.address IS NOT NULL AND fip2.address IS NOT NULL)
+    WHERE NOT (source_host.address IS NULL AND destination_host.address IS NULL)
+    AND NOT (source_host.address IS NOT NULL AND destination_host.address IS NOT NULL)
     AND fact.created_at >= ?
 )
 SELECT
-    HOST(address) AS address,
+    address,
     COUNT(*) AS count,
     ROUND(SUM(length) / (1024 * 1024), 3) AS size,
     AVG(send) AS send,
     TO_TIMESTAMP(AVG(EPOCH(created_at))) AS avg_date
 FROM ip
-GROUP BY HOST(address)
+GROUP BY address
 ORDER BY size DESC
 """,
     [analyse_start],
@@ -246,42 +269,51 @@ local_ip_column = st.columns(2, gap="large")
 
 local_ip_traffic = con.execute(
     """
-WITH ip AS
+WITH fact_ip_host AS
+(
+    SELECT
+     fact.*,
+     host1.host AS source_host,
+     host2.host AS destination_host
+    FROM gold_fact_network_ip fact
+    LEFT JOIN gold_dim_network_host host1 ON fact.source_address = host1.address
+    LEFT JOIN gold_dim_network_host host2 ON fact.destination_address = host2.address
+),
+interface_host AS
+(
+    SELECT host.host
+    FROM gold_dim_network_interface int
+    LEFT JOIN gold_dim_network_host host ON host.address = int.address
+),
+ip AS
 (
     SELECT
         fact.created_at,
-        COALESCE(fip1.host, fip2.host)::INET AS address,
         CASE
-            WHEN fip1.host IS NULL THEN 0
-            WHEN fip2.host IS NULL THEN 1
+            WHEN source_int.host IS NOT NULL THEN fact.source_host
+            WHEN destination_int.host IS NOT NULL THEN fact.destination_host
+        END AS address,
+        CASE
+            WHEN source_int.host IS NULL THEN 0
+            WHEN destination_int.host IS NULL THEN 1
         END AS send,
         pack.length,
-    FROM gold_fact_network_ip fact
-    LEFT JOIN (
-                  SELECT host.host
-                  FROM gold_dim_network_interface int
-                  LEFT JOIN gold_dim_network_host host ON host.address = int.address
-           ) fip1
-    ON HOST(fact.source_address::INET) = fip1.host
-    LEFT JOIN (
-                  SELECT host.host
-                  FROM gold_dim_network_interface int
-                  LEFT JOIN gold_dim_network_host host ON host.address = int.address
-           ) fip2
-    ON HOST(fact.destination_address::INET) = fip2.host
+    FROM fact_ip_host fact
+    LEFT JOIN interface_host source_int ON fact.source_host = source_int.host
+    LEFT JOIN interface_host destination_int ON fact.destination_host = destination_int.host
     LEFT JOIN gold_fact_network_packet pack ON fact._id = pack._id
-    WHERE NOT (fip1.host IS NULL AND fip2.host IS NULL)
-    AND NOT (fip1.host IS NOT NULL AND fip2.host IS NOT NULL)
+    WHERE NOT (source_int.host IS NULL AND destination_int.host IS NULL)
+    AND NOT (source_int.host IS NOT NULL AND destination_int.host IS NOT NULL)
     AND fact.created_at >= ?
 )
 SELECT
-    HOST(address) AS address,
+    address,
     COUNT(*) AS count,
     ROUND(SUM(length) / (1024 * 1024), 3) AS size,
     AVG(send) AS send,
     TO_TIMESTAMP(AVG(EPOCH(created_at))) AS avg_date
 FROM ip
-GROUP BY HOST(address)
+GROUP BY address
 ORDER BY size DESC
 """,
     [analyse_start],
@@ -316,45 +348,40 @@ local_port_column = st.columns(2, gap="large")
 
 local_port_traffic = con.execute(
     """
-WITH ip
-AS (
+WITH fact_ip_host AS
+(
+    SELECT
+     fact.*,
+     host1.host AS source_host,
+     host2.host AS destination_host
+    FROM gold_fact_network_ip fact
+    LEFT JOIN gold_dim_network_host host1 ON fact.source_address = host1.address
+    LEFT JOIN gold_dim_network_host host2 ON fact.destination_address = host2.address
+),
+interface_host AS
+(
+    SELECT host.host
+    FROM gold_dim_network_interface int
+    LEFT JOIN gold_dim_network_host host ON host.address = int.address
+),
+ip AS
+(
     SELECT fact.created_at
         ,CASE
-            WHEN fip1.host IS NULL
-                THEN fact.destination_port
-            WHEN fip2.host IS NULL
-                THEN fact.source_port
+            WHEN source_int.host IS NULL THEN fact.destination_port
+            WHEN destination_int.host IS NULL THEN fact.source_port
             END AS port
         ,CASE
-            WHEN fip1.host IS NULL
-                THEN 0
-            WHEN fip2.host IS NULL
-                THEN 1
+            WHEN source_int.host IS NULL THEN 0
+            WHEN destination_int.host IS NULL THEN 1
             END AS send
         ,pack.length
-        ,
-    FROM gold_fact_network_ip fact
-    LEFT JOIN (
-                  SELECT host.host
-                  FROM gold_dim_network_interface int
-                  LEFT JOIN gold_dim_network_host host ON host.address = int.address
-           ) fip1
-    ON HOST(fact.source_address::INET) = fip1.host
-    LEFT JOIN (
-                  SELECT host.host
-                  FROM gold_dim_network_interface int
-                  LEFT JOIN gold_dim_network_host host ON host.address = int.address
-        ) fip2
-    ON HOST(fact.destination_address::INET) = fip2.host
+    FROM fact_ip_host fact
+    LEFT JOIN interface_host source_int ON fact.source_host = source_int.host
+    LEFT JOIN interface_host destination_int ON fact.destination_host = destination_int.host
     LEFT JOIN gold_fact_network_packet pack ON fact._id = pack._id
-    WHERE NOT (
-            fip1.host IS NULL
-            AND fip2.host IS NULL
-            )
-        AND NOT (
-            fip1.host IS NOT NULL
-            AND fip2.host IS NOT NULL
-            )
+    WHERE NOT (source_int.host IS NULL AND destination_int.host IS NULL)
+        AND NOT (source_int.host IS NOT NULL AND destination_int.host IS NOT NULL)
         AND fact.created_at >= ?
     )
 SELECT ip.port
@@ -367,8 +394,7 @@ FROM ip
 LEFT JOIN gold_dim_network_open_port dim ON ip.port = dim.port
     AND ip.created_at >= dim.started_at
     AND ip.created_at <= dim.inserted_at
-GROUP BY ip.port
-    ,COALESCE(dim.command, 'Unknown')
+GROUP BY ip.port, COALESCE(dim.command, 'Unknown')
 ORDER BY size DESC
 """,
     [analyse_start],
