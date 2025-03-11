@@ -40,7 +40,7 @@ Ensure the following dependencies are installed before proceeding:
 
 1. **Install rstracer**:
    ```shell
-   cargo install --git https://github.com/VictorMeyer77/rstracer.git --tag 0.1.0
+   cargo install --git https://github.com/VictorMeyer77/rstracer.git --tag 0.1.1
    ```
 
 2. **System Dependencies**:
